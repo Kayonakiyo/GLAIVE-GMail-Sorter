@@ -48,8 +48,9 @@
         let currentPage;
         let mailIDs = [];
         // By default, analyze by sender raw email address.
-
+        console.log("Beginning retrieval of messages... ")
         while(currentMessageCount == 501){ // if less than max (edge case where someone has a multiple of 501 lmao)
+          console.log(`Progress : ${mailIDs.length} emails read...`)
           let url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=500`;
           if (currentPage) {
               url += `&pageToken=${currentPage}`;
@@ -69,16 +70,14 @@
 
           let json = await res.json();
           if(json.messages){
-            console.log("messages found");
             mailIDs = mailIDs.concat(json.messages.map(message => message.id));
           } else {
-            console.log("no messages found");
           }
 
           if(json.resultSizeEstimate && json.nextPageToken){
             currentMessageCount = json.resultSizeEstimate;
             currentPage = json.nextPageToken;
-            console.log(`Moving onto page {$currentPage}`);
+            console.log("\r"); // so that progress can be done properly next while loop
           } else if (json.resultSizeEstimate && !json.nextPageToken){ // no next page token, finish here.
             console.log('Final messages retrieved!')
             break;
@@ -87,8 +86,49 @@
         // After getting all ID's, now we can identify details on each email.
         // For now we're just getting raw sender emails.
 
+        let senderMap = new Map(); // each unique name pairs with a unique email, count these, but use names as visual.
+        let senderCountMap = new Map();
+        let procCount = 0;
+        let totalMailCount = mailIDs.length;
         while(mailIDs.length != 0){
-          
+          console.log(`Current emails processed ${procCount}/${totalMailCount}\r`)
+          let url = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${mailIDs.pop()}`;
+          let res = await fetch(url, {
+            method: "GET",
+            headers: {
+              "Authorization": `Bearer ${token.access_token}`,
+              "Content-type": "application/json; charset=UTF-8"
+            }
+          });
+
+          if(!res.ok){
+            console.log("bad response");
+          }
+
+          let json = await res.json();
+          let currentHeader = [];
+          let currentSenderName = "";
+          let currentSenderRawEmail = "";
+          if(json.payload){
+            console.log("message found");
+            currentHeader = json.payload.headers;
+
+            currentSenderName = json.payload.headers.find((element) => element.name == "From");
+            currentSenderName = currentSenderName.value;
+            //currentSenderName = json.payload.headers[22].value; // "From" header [not all email payloads haev same 'headers' length :(]
+            currentSenderRawEmail = currentSenderName.substring(currentSenderName.indexOf("<")+1, currentSenderName.lastIndexOf(">"));
+            currentSenderName = currentSenderName.substring(0, currentSenderName.indexOf("<")).trim();
+            
+            senderMap.set(currentSenderName, currentSenderRawEmail);
+            if(!senderCountMap.get()){ // if count doesnt exist, make it
+              senderCountMap.set(currentSenderRawEmail, 1);
+            } else {
+              senderCountMap.set(currentSenderRawEmail, senderCountMap.get(currentSenderRawEmail)+1);
+            }
+            procCount++;
+          } else {
+            console.log("no messages found");
+          }
         }
 
 
