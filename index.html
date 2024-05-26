@@ -168,7 +168,13 @@
 
         const t1 = performance.now();
         console.log(`Processing 100 emails via normal heuristic took ${t1-t0} ms.` )
+        // run 1 : 25278 ms
+        // run 2 : 18313 ms
+        // run 3 : 15155 ms.
+        // run 4 : 14717 ms.
+        // run 5 : 15885 ms.
 
+        // seems multiple runs go better... avg is 17,869.6 ms for 100 emails (way too slow) about 178.7ms per email fetch + analysis
 
         // rememeber that the raw emails are unique, while the names are not
         // since a company may use its name, like Google or Indeed across multiple
