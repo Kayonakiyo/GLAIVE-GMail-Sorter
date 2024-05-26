@@ -123,7 +123,7 @@
         let procCount = 0;
         let totalMailCount = mailIDs.length;
 
-
+        const t0 = performance.now();
         // original condition (b4 test switch) : mailIDs.length != 0
         while(procCount < 100){
 
@@ -165,6 +165,9 @@
             console.log("no messages found");
           }
         }
+
+        const t1 = performance.now();
+        console.log(`Processing 100 emails via normal heuristic took ${t1-t0} ms.` )
 
 
         // rememeber that the raw emails are unique, while the names are not
