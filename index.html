@@ -125,7 +125,7 @@
 
 
         // original condition (b4 test switch) : mailIDs.length != 0
-        while(procCount < 10){
+        while(procCount < 100){
 
           console.log(`Current emails processed ${procCount}/${totalMailCount}\r`)
           let url = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${mailIDs.pop()}`;
@@ -167,7 +167,9 @@
         }
 
 
-
+        // rememeber that the raw emails are unique, while the names are not
+        // since a company may use its name, like Google or Indeed across multiple
+        // email senders! the names just give a general idea of what orgs are sending these!
         console.log(mailIDs);
 
       }
