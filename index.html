@@ -125,32 +125,52 @@
 
         const t0 = performance.now();
         // original condition (b4 test switch) : mailIDs.length != 0
-        while(procCount < 100){
 
-          console.log(`Current emails processed ${procCount}/${totalMailCount}\r`)
-          let url = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${mailIDs.pop()}`;
-          let res = await fetch(url, {
-            method: "GET",
-            headers: {
-              "Authorization": `Bearer ${token.access_token}`,
-              "Content-type": "application/json; charset=UTF-8"
-            }
-          });
+        // messages.get has 5 quota units per call, and the PURL (per-user rate limit is 250 quota units per user per second>>> 250/5 = 50 max concurrent reqs / sec !)
+        const batchSize = 50;
+        let testSetUrls = mailIDs.slice(0, batchSize); // lets keep batch below 250/s per gapi specs
+        
+        console.log(`Current emails processed ${procCount}/${totalMailCount}\r`)
+        let i = 1;
+        let allResults = []
+        while(i <= 2){
+          let results = await Promise.allSettled(testSetUrls.map(async (mailID) => 
+          {
+              let url = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${mailID}`;
+              let res = await fetch(url, 
+                {
+                  method: "GET",
+                  headers: {
+                    "Authorization": `Bearer ${token.access_token}`,
+                    "Content-type": "application/json; charset=UTF-8",
+                  }
+                }
+              );
+              let json = await res.json();
+              return json.payload.headers;
+          }));  
+          allResults = allResults.concat(results);
+          testSetUrls = mailIDs.slice(batchSize*i, batchSize*(i+1));
+          i++
+          await new Promise(r => setTimeout(r, 300)); // fine tune to avoid 429 codes
+        } // 100 results
 
-          if(!res.ok){
-            console.log("bad response");
-          }
+        console.log(`retrieved ${allResults.length} emails! unpacking...`)
 
-          let json = await res.json();
-          let currentHeader = [];
+        // Unpack Promise Objects
+        let allResultsUnpacked = []
+        for(let j = 0; j < allResults.length; j++){
+          allResultsUnpacked.push(allResults[j].value);
+        }
+         
+        // Extract Names and Sender Emails
+        while(allResultsUnpacked.length > 0){
+          let currentHeader = allResultsUnpacked.pop();
           let currentSenderName = "";
           let currentSenderRawEmail = "";
-          if(json.payload){
-            currentHeader = json.payload.headers;
-
-            currentSenderName = json.payload.headers.find((element) => element.name == "From");
+          if(currentHeader){
+            currentSenderName = currentHeader.find((element) => element.name == "From");
             currentSenderName = currentSenderName.value;
-            //currentSenderName = json.payload.headers[22].value; // "From" header [not all email payloads haev same 'headers' length :(]
             currentSenderRawEmail = currentSenderName.substring(currentSenderName.indexOf("<")+1, currentSenderName.lastIndexOf(">"));
             currentSenderName = currentSenderName.substring(0, currentSenderName.indexOf("<")).trim();
             
@@ -160,26 +180,30 @@
             } else {
               senderCountMap.set(currentSenderRawEmail, senderCountMap.get(currentSenderRawEmail)+1);
             }
-            procCount++;
           } else {
             console.log("no messages found");
           }
         }
 
         const t1 = performance.now();
-        console.log(`Processing 100 emails via normal heuristic took ${t1-t0} ms.` )
+        console.log(`Processing 100 emails via updated heuristic took ${t1-t0} ms.` )
+        // Without maxing out the api via asyncs.
         // run 1 : 25278 ms
         // run 2 : 18313 ms
         // run 3 : 15155 ms.
         // run 4 : 14717 ms.
         // run 5 : 15885 ms.
+        // With maxing out the api via asyncs. [multi-fetch + unpack promises + process headers send to Maps]
+        // run 1 : 3688 ms [OBSCENE SPEEDUP WHOOOO!!!], about half a minute for 1000 emails so the math is working out pretty well! 4.8x speedup compared to avg of non-optimal. could tune delay to maximize fetches without triggering 429.
 
         // seems multiple runs go better... avg is 17,869.6 ms for 100 emails (way too slow) about 178.7ms per email fetch + analysis
 
         // rememeber that the raw emails are unique, while the names are not
         // since a company may use its name, like Google or Indeed across multiple
         // email senders! the names just give a general idea of what orgs are sending these!
-        console.log(mailIDs);
+        console.log("done!");
+        console.log(senderMap);
+        console.log(senderCountMap);
 
       }
       /**
