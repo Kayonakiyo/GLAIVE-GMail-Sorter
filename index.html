@@ -19,6 +19,8 @@
     <pre id="content" style="white-space: pre-wrap;"></pre>
 
     <script type="text/javascript">
+      //import {fs} from 'fs';
+      
       /* exported gapiLoaded */
       /* exported gisLoaded */
       /* exported handleAuthClick */
@@ -43,54 +45,88 @@
       document.getElementById('signout_button').style.visibility = 'hidden';
 
       async function analyzeInbox(){
+        let newScan = false;
         let token = gapi.client.getToken();
         let currentMessageCount = 501;
         let currentPage;
         let mailIDs = [];
-        // By default, analyze by sender raw email address.
-        console.log("Beginning retrieval of messages... ")
-        while(currentMessageCount == 501){ // if less than max (edge case where someone has a multiple of 501 lmao)
-          console.log(`Progress : ${mailIDs.length} emails read...`)
-          let url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=500`;
-          if (currentPage) {
-              url += `&pageToken=${currentPage}`;
-            }
-          // 500 at a time, first fetch the root email ids.
-          let res = await fetch(url, {
-            method: "GET",
-            headers: {
-              "Authorization": `Bearer ${token.access_token}`,
-              "Content-type": "application/json; charset=UTF-8"
-            }
-          });
-
-          if(!res.ok){
-            console.log("bad response");
-          }
-
-          let json = await res.json();
-          if(json.messages){
-            mailIDs = mailIDs.concat(json.messages.map(message => message.id));
-          } else {
-          }
-
-          if(json.resultSizeEstimate && json.nextPageToken){
-            currentMessageCount = json.resultSizeEstimate;
-            currentPage = json.nextPageToken;
-            console.log("\r"); // so that progress can be done properly next while loop
-          } else if (json.resultSizeEstimate && !json.nextPageToken){ // no next page token, finish here.
-            console.log('Final messages retrieved!')
-            break;
-          }
+        
+        if(localStorage.getItem("saved_ids")){
+          console.log("SavedIDs from a previous session were found! Moving onto analysis!")
+          mailIDs = JSON.parse(localStorage.getItem("saved_ids"));
+        } else {
+          console.log("SavedIDs from a previous session were not found, running new scan of inbox!");
+          newScan = true;
         }
+
+        if(newScan){ // not using async here since we only need relatively few calls since GAPI returns 500 pieces of data in one call! 
+          // By default, analyze by sender raw email address.
+          console.log("Beginning retrieval of messages... ")
+          while(currentMessageCount == 501){ // if less than max (edge case where someone has a multiple of 501 lmao)
+            console.log(`Progress : ${mailIDs.length} emails read...`)
+            let url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=500`;
+            if (currentPage) {
+                url += `&pageToken=${currentPage}`;
+              }
+            // 500 at a time, first fetch the root email ids.
+            let res = await fetch(url, {
+              method: "GET",
+              headers: {
+                "Authorization": `Bearer ${token.access_token}`,
+                "Content-type": "application/json; charset=UTF-8"
+              }
+            });
+
+            if(!res.ok){
+              console.log("bad response");
+            }
+
+            let json = await res.json();
+            if(json.messages){
+              mailIDs = mailIDs.concat(json.messages.map(message => message.id));
+            } else { 
+            }
+
+            if(json.resultSizeEstimate && json.nextPageToken){
+              currentMessageCount = json.resultSizeEstimate;
+              currentPage = json.nextPageToken;
+              console.log("\r"); // so that progress can be done properly next while loop
+            } else if (json.resultSizeEstimate && !json.nextPageToken){ // no next page token, finish here.
+              console.log('Final messages retrieved!')
+              break;
+            }
+          }
+
+          console.log("attempt to write out data to localStorage")
+
+          if(mailIDs){
+            // 5MB localStorage limit, check that its less than 5,000,000 bytes/chars [would need LOTS of emails for this]
+            // Ex. in my test set of about 19,265 emails, the ids array when stringified was 366,036 bytes, so about 0.36MB!
+            if( (new TextEncoder().encode(JSON.stringify(mailIDs)).length) < 50000001){
+              localStorage.setItem("saved_ids", JSON.stringify(mailIDs));
+              console.log("successfully saved ids to localStorage!")
+            } else {
+              alert("too many emails! can't save ids to local storage! lower batch size!")
+            }
+          }
+
+        }
+
+        
+        
         // After getting all ID's, now we can identify details on each email.
         // For now we're just getting raw sender emails.
+        // Due to needing to grab each email via their IDs one by one, will need to use batch asyncs or this WILL take forever.
 
         let senderMap = new Map(); // each unique name pairs with a unique email, count these, but use names as visual.
         let senderCountMap = new Map();
         let procCount = 0;
         let totalMailCount = mailIDs.length;
-        while(mailIDs.length != 0){
+
+
+        // original condition (b4 test switch) : mailIDs.length != 0
+        while(procCount < 10){
+
           console.log(`Current emails processed ${procCount}/${totalMailCount}\r`)
           let url = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${mailIDs.pop()}`;
           let res = await fetch(url, {
@@ -110,7 +146,6 @@
           let currentSenderName = "";
           let currentSenderRawEmail = "";
           if(json.payload){
-            console.log("message found");
             currentHeader = json.payload.headers;
 
             currentSenderName = json.payload.headers.find((element) => element.name == "From");
@@ -120,7 +155,7 @@
             currentSenderName = currentSenderName.substring(0, currentSenderName.indexOf("<")).trim();
             
             senderMap.set(currentSenderName, currentSenderRawEmail);
-            if(!senderCountMap.get()){ // if count doesnt exist, make it
+            if(!senderCountMap.get(currentSenderRawEmail)){ // if count doesnt exist, make it
               senderCountMap.set(currentSenderRawEmail, 1);
             } else {
               senderCountMap.set(currentSenderRawEmail, senderCountMap.get(currentSenderRawEmail)+1);
