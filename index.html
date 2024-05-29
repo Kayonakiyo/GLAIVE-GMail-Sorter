@@ -133,16 +133,41 @@
         // For now we're just getting raw sender emails.
         // Due to needing to grab each email via their IDs one by one, will need to use batch asyncs or this WILL take forever.
         if(newProcess){
+          let EMAIL_PROCESS_COUNT = window.prompt("Enter Number of Emails you want to process.")
+          let TIME_ORDER = window.prompt("Oldest to Newest [1] or Newest to Oldest [2]?")
+
           const t0 = performance.now();
           // messages.get has 5 quota units per call, and the PURL (per-user rate limit is 250 quota units per user per second>>> 250/5 = 50 max concurrent reqs / sec !)
-          const batchSize = 50;
-          let testSetUrls = mailIDs.slice(0, batchSize); // lets keep batch below 250/s per gapi specs
-        
-          console.log(`Current emails processed ${procCount}/${totalMailCount}\r`)
-          let i = 1;
+          const batchSize = 50; // lets keep batch below 250 quota units/s per gapi specs
+          let desired_urls = [];
+          if(TIME_ORDER == 1){ // oldest to newest, slice from index size-1 to 0
+            desired_urls = mailIDs.slice(mailIDs.length-EMAIL_PROCESS_COUNT, mailIDs.length); // HOW MANY EMAILS ARE IN SCOPE? 
+          } else { // newest to oldest + default if bad input, slice from index 0 beyond
+            desired_urls = mailIDs.slice(0, EMAIL_PROCESS_COUNT); // HOW MANY EMAILS ARE IN SCOPE? 
+          }
+
+          let urlBatches = []
+
+          // due to variance + quota limitiations, we must split that range of urls into batches of 50 entries each.
+          // if not divisible by 50, do a mod to resize the last batch
+          let batchCount = Math.floor(desired_urls.length/batchSize);
+          if(desired_urls.length % batchSize != 0){
+            batchCount++; // an extra batch for the remainder of emails if not divisible by 50
+          }
+
+          for(let i = 0; i < batchCount; i++){
+            // last batch with non-div sizing, use different end range
+            if(desired_urls.length < 50){
+              urlBatches.push(desired_urls.splice(0)); // whatevers left
+              break;
+            }
+            urlBatches.push(desired_urls.splice(0, 50)) // 50 at a time
+          }
+          
+          //console.log(`Current emails processed ${procCount}/${totalMailCount}\r`)
           let allResults = []
-          while(i <= 2){
-            let results = await Promise.allSettled(testSetUrls.map(async (mailID) => 
+          while(urlBatches.length > 0){
+            let results = await Promise.allSettled(urlBatches.pop().map(async (mailID) => 
             {
                 let url = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${mailID}`;
                 let res = await fetch(url, 
@@ -155,20 +180,19 @@
                   }
                 );
                 let json = await res.json();
-                return json.payload.headers;
+                return json;
+                //return json.payload.headers;
             }));  
             allResults = allResults.concat(results);
-            testSetUrls = mailIDs.slice(batchSize*i, batchSize*(i+1));
-            i++
             await new Promise(r => setTimeout(r, 400)); // fine tune to avoid 429 codes
           } // 100 results
 
           console.log(`retrieved ${allResults.length} emails! unpacking...`)
 
-          // Unpack Promise Objects
+          // Unpack Promise JSON Objects
           let allResultsUnpacked = []
           for(let j = 0; j < allResults.length; j++){
-            allResultsUnpacked.push(allResults[j].value);
+            allResultsUnpacked.push(allResults[j].value.payload.headers);
           }
          
           // Extract Names and Sender Emails
@@ -225,8 +249,11 @@
         by one might be painful.
       */
       function outputData(senderCountMap){
-        const sendersSortedDesc = [...senderCountMap.entries()].sort((a, b) => b[1] - a[1]);
-        console.log(sendersSortedDesc);
+        const sendersSortedDesc = [...senderCountMap.entries()].sort((a, b) => b[1] - a[1]); // turns map into a sorted array, descending order
+        console.log(sendersSortedDesc); 
+        let finalData = "";
+        sendersSortedDesc.forEach((entry) => {finalData += (entry[0] + ":" + entry[1] + "\n") });
+        document.getElementById('analysisResults').innerText = finalData;
       }
 
       function serializeMap(mapToSerialize){

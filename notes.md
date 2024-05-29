@@ -14,6 +14,9 @@
 // since a company may use its name, like Google or Indeed across multiple
 // email senders! the names just give a general idea of what orgs are sending these!
 
+5/28/24 9:00pm fixed a devious bug in which the async awaits would be rejected because json.payload wouldn't exist sometimes? played it safe and modified the unpacking of the promise objects so that it wont have to search for parameters that the json may not have at that time. in essence, i simplified the email fetching even more by not automatically stripping the json payload headers i need in that async function, just modifying my unpacking code to handle that too to avoid having rejected promises!
+
+
 
 later :
 
