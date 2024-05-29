@@ -17,6 +17,7 @@
     <label for="api_key">API_KEY</label>
     <input type="password" id="api_key" name="api_key"/>
     <pre id="content" style="white-space: pre-wrap;"></pre>
+    <p id="analysisResults"></p>
 
     <script type="text/javascript">
       //import {fs} from 'fs';
@@ -112,100 +113,136 @@
 
         }
 
-        
-        
-        // After getting all ID's, now we can identify details on each email.
-        // For now we're just getting raw sender emails.
-        // Due to needing to grab each email via their IDs one by one, will need to use batch asyncs or this WILL take forever.
+        // ----- EMAIL PROCESSING SECTION AFTER DOWNLOADING MESSAGE ID'S ----- // 
 
+        let newProcess = false;
         let senderMap = new Map(); // each unique name pairs with a unique email, count these, but use names as visual.
         let senderCountMap = new Map();
         let procCount = 0;
         let totalMailCount = mailIDs.length;
 
-        const t0 = performance.now();
-        // original condition (b4 test switch) : mailIDs.length != 0
-
-        // messages.get has 5 quota units per call, and the PURL (per-user rate limit is 250 quota units per user per second>>> 250/5 = 50 max concurrent reqs / sec !)
-        const batchSize = 50;
-        let testSetUrls = mailIDs.slice(0, batchSize); // lets keep batch below 250/s per gapi specs
+        if(localStorage.getItem("savedSenderData")){
+          console.log("Sender data from a previous session was found! Outputting results immediately!")
+          senderCountMap = deserializeMap(localStorage.getItem("savedSenderData"));
+        } else {
+          console.log("Sender data from a previous session was not found, running new email analysis.");
+          newProcess = true;
+        }
         
-        console.log(`Current emails processed ${procCount}/${totalMailCount}\r`)
-        let i = 1;
-        let allResults = []
-        while(i <= 2){
-          let results = await Promise.allSettled(testSetUrls.map(async (mailID) => 
-          {
-              let url = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${mailID}`;
-              let res = await fetch(url, 
-                {
-                  method: "GET",
-                  headers: {
-                    "Authorization": `Bearer ${token.access_token}`,
-                    "Content-type": "application/json; charset=UTF-8",
+        // After getting all ID's, now we can identify details on each email.
+        // For now we're just getting raw sender emails.
+        // Due to needing to grab each email via their IDs one by one, will need to use batch asyncs or this WILL take forever.
+        if(newProcess){
+          const t0 = performance.now();
+          // messages.get has 5 quota units per call, and the PURL (per-user rate limit is 250 quota units per user per second>>> 250/5 = 50 max concurrent reqs / sec !)
+          const batchSize = 50;
+          let testSetUrls = mailIDs.slice(0, batchSize); // lets keep batch below 250/s per gapi specs
+        
+          console.log(`Current emails processed ${procCount}/${totalMailCount}\r`)
+          let i = 1;
+          let allResults = []
+          while(i <= 2){
+            let results = await Promise.allSettled(testSetUrls.map(async (mailID) => 
+            {
+                let url = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${mailID}`;
+                let res = await fetch(url, 
+                  {
+                    method: "GET",
+                    headers: {
+                      "Authorization": `Bearer ${token.access_token}`,
+                      "Content-type": "application/json; charset=UTF-8",
+                    }
                   }
-                }
-              );
-              let json = await res.json();
-              return json.payload.headers;
-          }));  
-          allResults = allResults.concat(results);
-          testSetUrls = mailIDs.slice(batchSize*i, batchSize*(i+1));
-          i++
-          await new Promise(r => setTimeout(r, 300)); // fine tune to avoid 429 codes
-        } // 100 results
+                );
+                let json = await res.json();
+                return json.payload.headers;
+            }));  
+            allResults = allResults.concat(results);
+            testSetUrls = mailIDs.slice(batchSize*i, batchSize*(i+1));
+            i++
+            await new Promise(r => setTimeout(r, 400)); // fine tune to avoid 429 codes
+          } // 100 results
 
-        console.log(`retrieved ${allResults.length} emails! unpacking...`)
+          console.log(`retrieved ${allResults.length} emails! unpacking...`)
 
-        // Unpack Promise Objects
-        let allResultsUnpacked = []
-        for(let j = 0; j < allResults.length; j++){
-          allResultsUnpacked.push(allResults[j].value);
-        }
-         
-        // Extract Names and Sender Emails
-        while(allResultsUnpacked.length > 0){
-          let currentHeader = allResultsUnpacked.pop();
-          let currentSenderName = "";
-          let currentSenderRawEmail = "";
-          if(currentHeader){
-            currentSenderName = currentHeader.find((element) => element.name == "From");
-            currentSenderName = currentSenderName.value;
-            currentSenderRawEmail = currentSenderName.substring(currentSenderName.indexOf("<")+1, currentSenderName.lastIndexOf(">"));
-            currentSenderName = currentSenderName.substring(0, currentSenderName.indexOf("<")).trim();
-            
-            senderMap.set(currentSenderName, currentSenderRawEmail);
-            if(!senderCountMap.get(currentSenderRawEmail)){ // if count doesnt exist, make it
-              senderCountMap.set(currentSenderRawEmail, 1);
-            } else {
-              senderCountMap.set(currentSenderRawEmail, senderCountMap.get(currentSenderRawEmail)+1);
-            }
-          } else {
-            console.log("no messages found");
+          // Unpack Promise Objects
+          let allResultsUnpacked = []
+          for(let j = 0; j < allResults.length; j++){
+            allResultsUnpacked.push(allResults[j].value);
           }
+         
+          // Extract Names and Sender Emails
+          while(allResultsUnpacked.length > 0){
+            let currentHeader = allResultsUnpacked.pop();
+            let currentSenderName = "";
+            let currentSenderRawEmail = "";
+            if(currentHeader){
+              currentSenderName = currentHeader.find((element) => element.name == "From");
+              currentSenderName = currentSenderName.value;
+              currentSenderRawEmail = currentSenderName.substring(currentSenderName.indexOf("<")+1, currentSenderName.lastIndexOf(">"));
+              currentSenderName = currentSenderName.substring(0, currentSenderName.indexOf("<")).trim();
+              
+              senderMap.set(currentSenderName, currentSenderRawEmail);
+              if(!senderCountMap.get(currentSenderRawEmail)){ // if count doesnt exist, make it
+                senderCountMap.set(currentSenderRawEmail, 1);
+              } else {
+                senderCountMap.set(currentSenderRawEmail, senderCountMap.get(currentSenderRawEmail)+1);
+              }
+            } else {
+              console.log("no messages found");
+            }
+          }
+
+          const t1 = performance.now();
+          console.log(`Processing emails took ${t1-t0} ms.` )
+
         }
 
-        const t1 = performance.now();
-        console.log(`Processing 100 emails via updated heuristic took ${t1-t0} ms.` )
-        // Without maxing out the api via asyncs.
-        // run 1 : 25278 ms
-        // run 2 : 18313 ms
-        // run 3 : 15155 ms.
-        // run 4 : 14717 ms.
-        // run 5 : 15885 ms.
-        // With maxing out the api via asyncs. [multi-fetch + unpack promises + process headers send to Maps]
-        // run 1 : 3688 ms [OBSCENE SPEEDUP WHOOOO!!!], about half a minute for 1000 emails so the math is working out pretty well! 4.8x speedup compared to avg of non-optimal. could tune delay to maximize fetches without triggering 429.
-
-        // seems multiple runs go better... avg is 17,869.6 ms for 100 emails (way too slow) about 178.7ms per email fetch + analysis
-
-        // rememeber that the raw emails are unique, while the names are not
-        // since a company may use its name, like Google or Indeed across multiple
-        // email senders! the names just give a general idea of what orgs are sending these!
         console.log("done!");
-        console.log(senderMap);
         console.log(senderCountMap);
+        console.log("Saving sender data to localStorage...")
+
+        if(senderCountMap && newProcess){ // only save if analysis was redone
+          if((new TextEncoder().encode(JSON.stringify(senderCountMap)).length) < 50000001){
+            localStorage.setItem("savedSenderData", serializeMap(senderCountMap));
+            console.log("successfully saved sender data to localStorage!")
+          } else {
+            alert("too many emails! can't save sender data to local storage! lower batch size!")
+          }
+        } else {
+          console.log("bypassing saving data.")
+        }
+
+        outputData(senderCountMap); // finally output the data!
 
       }
+
+      /*
+        Outputs data in largest to smallest order based on raw email senders, for safety reasons,
+        I will likely not implement API based deletion so this will allow you to easily get the email
+        and trash those senders emails from the normal gmail interface. This could be helpful though for
+        multiple unique senders with 1 email each (looking at you university mailing lists) that going one
+        by one might be painful.
+      */
+      function outputData(senderCountMap){
+        const sendersSortedDesc = [...senderCountMap.entries()].sort((a, b) => b[1] - a[1]);
+        console.log(sendersSortedDesc);
+      }
+
+      function serializeMap(mapToSerialize){
+        if(mapToSerialize){
+          // to object to JSON String
+          return JSON.stringify(Object.fromEntries(mapToSerialize));
+        }
+      }
+
+      function deserializeMap(stringMapToDeserialize){
+        if(stringMapToDeserialize){
+          // to JS Object, then to Map
+          return new Map(Object.entries(JSON.parse(stringMapToDeserialize)));
+        }
+      }
+
       /**
        * Callback after api.js is loaded.
        */
