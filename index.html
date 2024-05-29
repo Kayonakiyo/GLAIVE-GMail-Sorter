@@ -132,9 +132,13 @@
         // After getting all ID's, now we can identify details on each email.
         // For now we're just getting raw sender emails.
         // Due to needing to grab each email via their IDs one by one, will need to use batch asyncs or this WILL take forever.
-        if(newProcess){
+        if(!newProcess){ // CHANGE THIS AFTER DEBUGGING !!! BACK TO JUST NEWPROCESS
           let EMAIL_PROCESS_COUNT = window.prompt("Enter Number of Emails you want to process.")
           let TIME_ORDER = window.prompt("Oldest to Newest [1] or Newest to Oldest [2]?")
+
+          if(isNaN(EMAIL_PROCESS_COUNT) || EMAIL_PROCESS_COUNT < 1){
+            EMAIL_PROCESS_COUNT = 1; // in case they're tryna be funny
+          }
 
           const t0 = performance.now();
           // messages.get has 5 quota units per call, and the PURL (per-user rate limit is 250 quota units per user per second>>> 250/5 = 50 max concurrent reqs / sec !)
@@ -166,6 +170,7 @@
           
           //console.log(`Current emails processed ${procCount}/${totalMailCount}\r`)
           let allResults = []
+          let i = 0;
           while(urlBatches.length > 0){
             let results = await Promise.allSettled(urlBatches.pop().map(async (mailID) => 
             {
@@ -184,7 +189,17 @@
                 //return json.payload.headers;
             }));  
             allResults = allResults.concat(results);
-            await new Promise(r => setTimeout(r, 400)); // fine tune to avoid 429 codes
+            console.log(`Emails Fetched : ${((++i)*50)/allResults.length}`);
+            if(EMAIL_PROCESS_COUNT <= 200){
+              await new Promise(r => setTimeout(r, 150)); // fine tune to avoid 429 codes
+            } else if (EMAIL_PROCESS_COUNT <= 400){
+              await new Promise(r => setTimeout(r, 300)); // fine tune to avoid 429 codes
+            } else if (EMAIL_PROCESS_COUNT <= 600){
+              await new Promise(r => setTimeout(r, 450)); // fine tune to avoid 429 codes
+            } else { // for 601+ emails default to 600 max
+              await new Promise(r => setTimeout(r, 600));
+            } // possibly limit for 1000 emails 550 didnt work.
+            
           } // 100 results
 
           console.log(`retrieved ${allResults.length} emails! unpacking...`)
@@ -223,8 +238,12 @@
         }
 
         console.log("done!");
-        console.log(senderCountMap);
+
+        outputData(senderCountMap); // finally output the data!
+
+
         console.log("Saving sender data to localStorage...")
+
 
         if(senderCountMap && newProcess){ // only save if analysis was redone
           if((new TextEncoder().encode(JSON.stringify(senderCountMap)).length) < 50000001){
@@ -237,7 +256,7 @@
           console.log("bypassing saving data.")
         }
 
-        outputData(senderCountMap); // finally output the data!
+        
 
       }
 

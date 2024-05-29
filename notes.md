@@ -16,7 +16,36 @@
 
 5/28/24 9:00pm fixed a devious bug in which the async awaits would be rejected because json.payload wouldn't exist sometimes? played it safe and modified the unpacking of the promise objects so that it wont have to search for parameters that the json may not have at that time. in essence, i simplified the email fetching even more by not automatically stripping the json payload headers i need in that async function, just modifying my unpacking code to handle that too to avoid having rejected promises!
 
+currently testing batch limits and timings to avoid 429s which 
+can throw a wrench in it all, i can def ingore those rejections via 429 and process what i can but idk
 
+Table :
+| Email Count/Delay | 150ms | 300ms | 450ms | 600ms |
+|-------------------|-------|-------|-------|-------|
+| 0                 | ✅     | ✅     | ✅     | ✅     |
+| 100               | ✅     | ✅     | ✅     | ✅     |
+| 200               | ✅     | ✅     | ✅     | ✅     |
+| 300               | ❌     | ✅     | ✅     | ✅     |
+| 400               | ❌     | ✅     | ✅     | ✅     |
+| 500               | ❌     | ❌     | ✅     | ✅     |
+| 600               | ❌     | ❌     | ✅     | ✅     |
+| 700               | ❌     | ❌     | ❌     | ✅     |
+| 800               | ❌     | ❌     | ❌     | ✅     |
+| 900               | ❌     | ❌     | ❌     | ✅     |
+| 1000              | ❌     | ❌     | ❌     | ✅     |
+| 2000              | -     | -     | -     | -     |
+| 3000              | -     | -     | -     | -     |
+| 4000              | -     | -     | -     | -     |
+| 5000              | -     | -     | -     | -     |
+| 10000             | -     | -     | -     | -     |
+
+
+* also tested edge case of negative email count and typing NaN values.
+** naturally, any timings higher than the minimum will also work,
+as we are trying to see how much we can comfortably get away with speed wise. not all combinations were tested (e.g. 1k+ emails w/ 150ms delay is too much that would definitely yield some 429 errors, those are assumed to be invalid combinations by that merit).
+
+
+new idea, for bigger batches, take a 'big break' every 1000 emails or even smaller as the api is based on a 'moving average' which is kinda hard for my mind to wrap around right now, so I'll keep on testing.
 
 later :
 
